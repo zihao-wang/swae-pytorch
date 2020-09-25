@@ -9,7 +9,7 @@ import torch.optim as optim
 import torchvision.utils as vutils
 from swae.distributions import rand_cirlce2d, rand_ring2d, rand_uniform2d
 from swae.models.mnist import MNISTAutoencoder
-from swae.trainer import SWAEBatchTrainer
+from swae.trainer import SWAEBatchTrainer, XWAEBatchTrainer
 from torchvision import datasets, transforms
 
 
@@ -84,7 +84,8 @@ def main():
     else:
         distribution_fn = rand_uniform2d
     # create batch sliced_wasserstein autoencoder trainer
-    trainer = SWAEBatchTrainer(model, optimizer, distribution_fn, device=device)
+    # trainer = SWAEBatchTrainer(model, optimizer, distribution_fn, device=device)
+    trainer = XWAEBatchTrainer(model, optimizer, distribution_fn, device=device)
     # put networks in training mode
     model.train()
     # train networks for n epochs

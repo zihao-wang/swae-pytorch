@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from swae.distributions import rand_cirlce2d
+from alignlib import get_align
 
 
 def rand_projections(embedding_dim, num_samples=50):
@@ -145,6 +146,72 @@ class SWAEBatchTrainer:
                                            self.num_projections_, self.p_,
                                            self._device)
         w2 = float(self.weight) * _swd  # approximate wasserstein-2 distance
+        loss = bce + l1 + w2
+        return {
+            'loss': loss,
+            'bce': bce,
+            'l1': l1,
+            'w2': w2,
+            'encode': z,
+            'decode': recon_x
+        }
+
+
+class XWAEBatchTrainer:
+    """ Sliced Wasserstein Autoencoder Batch Trainer.
+
+        Args:
+            autoencoder (torch.nn.Module): module which implements autoencoder framework
+            optimizer (torch.optim.Optimizer): torch optimizer
+            distribution_fn (callable): callable to draw random samples
+            num_projections (int): number of projections to approximate sliced wasserstein distance
+            p (int): power of distance metric
+            weight (float): weight of divergence metric compared to reconstruction in loss
+            device (torch.Device): torch device
+    """
+    def __init__(self, autoencoder, optimizer, distribution_fn,
+                 align_name='atw', p=2, weight=10.0, device=None, **kwargs):
+        self.model_ = autoencoder
+        self.optimizer = optimizer
+        self._distribution_fn = distribution_fn
+        self.embedding_dim_ = self.model_.encoder.embedding_dim_
+        self.align_method = get_align(align_name=align_name, dim=self.embedding_dim_, **kwargs)
+        self.weight = weight
+        self._device = device if device else torch.device('cpu')
+
+    def __call__(self, x):
+        return self.eval_on_batch(x)
+
+    def train_on_batch(self, x):
+        # reset gradients
+        self.optimizer.zero_grad()
+        # autoencoder forward pass and loss
+        evals = self.eval_on_batch(x)
+        # backpropagate loss
+        evals['loss'].backward()
+        # update encoder and decoder parameters
+        self.optimizer.step()
+        return evals
+
+    def test_on_batch(self, x):
+        # reset gradients
+        self.optimizer.zero_grad()
+        # autoencoder forward pass and loss
+        evals = self.eval_on_batch(x)
+        return evals
+
+    def eval_on_batch(self, x):
+        x = x.to(self._device)
+        recon_x, z = self.model_(x)
+        # mutual information reconstruction loss
+        bce = F.binary_cross_entropy(recon_x, x)
+        # for explaination of additional L1 loss see references in README.md
+        # high lvl summary prevents variance collapse on latent variables
+        l1 = F.l1_loss(recon_x, x)
+        # divergence on transformation plane from X space to Z space to match prior
+        batch_size = z.shape[0]
+        latent_align_loss = self.align_method.align_loss(z, self._distribution_fn(batch_size).to(self._device))
+        w2 = float(self.weight) *  latent_align_loss# approximate wasserstein-2 distance
         loss = bce + l1 + w2
         return {
             'loss': loss,
