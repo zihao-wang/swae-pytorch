@@ -2,7 +2,7 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
-from swae.distributions import rand_cirlce2d
+from xwae.distributions import rand_cirlce2d
 from alignlib import get_align
 
 
@@ -170,7 +170,7 @@ class XWAEBatchTrainer:
             device (torch.Device): torch device
     """
     def __init__(self, autoencoder, optimizer, distribution_fn,
-                 align_name='atw', p=2, weight=10.0, device=None, **kwargs):
+                 align_name='atw', p=2, weight=1, device='cpu', **kwargs):
         self.model_ = autoencoder
         self.optimizer = optimizer
         self._distribution_fn = distribution_fn
@@ -211,7 +211,8 @@ class XWAEBatchTrainer:
         # divergence on transformation plane from X space to Z space to match prior
         batch_size = z.shape[0]
         latent_align_loss = self.align_method.align_loss(z, self._distribution_fn(batch_size).to(self._device))
-        w2 = float(self.weight) *  latent_align_loss# approximate wasserstein-2 distance
+        w2 = float(self.weight) *  latent_align_loss / batch_size# approximate wasserstein-2 distance
+        # w2 = 0
         loss = bce + l1 + w2
         return {
             'loss': loss,
