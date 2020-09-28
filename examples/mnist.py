@@ -1,20 +1,21 @@
 import argparse
+import json
 import os
 
 import matplotlib as mpl
+
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 import torch.optim as optim
 import torchvision.utils as vutils
-from xwae.distributions import rand_cirlce2d, rand_ring2d, rand_uniform2d
+from alignlib import plot_tree2D
+from torchvision import datasets, transforms
+from xwae.distributions import rand_cirlce2d, rand_ring2d, rand_uniform2d, randn
 from xwae.models.mnist import MNISTAutoencoder
 from xwae.trainer import SWAEBatchTrainer, XWAEBatchTrainer
 from xwae.tree_decoding import decode_tree
-from torchvision import datasets, transforms
 
-def decode_function(feature):
-    return model.decoder(feature)
 
 def main():
     # train args
@@ -26,6 +27,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=30, metavar='N',
                         help='number of epochs to train (default: 30)')
     parser.add_argument('--align_name', type=str, default='emd')
+    parser.add_argument('--fraction', type=float, default=0.0)
     parser.add_argument('--weight', type=float, default=1, help="weight for OT loss")
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate (default: 0.001)')
@@ -39,8 +41,9 @@ def main():
                         help='number of dataloader workers if device is CPU (default: 8)')
     parser.add_argument('--seed', type=int, default=7, metavar='S',
                         help='random seed (default: 7)')
-    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='number of batches to log training status (default: 10)')
+    parser.add_argument('--latent_dim', type=int, default=10)
     args = parser.parse_args()
 
     # create output directory
@@ -77,23 +80,29 @@ def main():
                             # transforms.Normalize((0.1307,), (0.3081,))
                         ])),
         batch_size=64, shuffle=False, **dataloader_kwargs)
+
     # create encoder and decoder
-    model = MNISTAutoencoder().to(device)
-    print(model)
+    model = MNISTAutoencoder(embedding_dim=args.latent_dim).to(device)
+
     # create optimizer
     # matching default Keras args for RMSprop
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     # optimizer = optim.RMSprop(model.parameters(), lr=args.lr, alpha=args.alpha)
+
     # determine latent distribution
-    if args.distribution == 'circle':
-        distribution_fn = rand_cirlce2d
-    elif args.distribution == 'ring':
-        distribution_fn = rand_ring2d
+    if args.latent_dim == 2:
+        if args.distribution == 'circle':
+            distribution_fn = rand_cirlce2d
+        elif args.distribution == 'ring':
+            distribution_fn = rand_ring2d
+        else:
+            distribution_fn = rand_uniform2d
     else:
-        distribution_fn = rand_uniform2d
+        distribution_fn = randn(args.latent_dim)
     # create batch sliced_wasserstein autoencoder trainer
     # trainer = SWAEBatchTrainer(model, optimizer, distribution_fn, device=device)
-    trainer = XWAEBatchTrainer(model, optimizer, distribution_fn, align_name=args.align_name, weight=args.weight, device=device)
+    trainer = XWAEBatchTrainer(model, optimizer, distribution_fn, align_name=args.align_name, dim=args.latent_dim, fraction=args.fraction, weight=args.weight, device=device)
+
     # put networks in training mode
     model.train()
     # train networks for n epochs
@@ -130,12 +139,14 @@ def main():
         torch.save(model.state_dict(), '{}/mnist_epoch_{}.pth'.format(chkptdir, epoch + 1))
 
         # save encoded samples plot
-        plt.figure(figsize=(10, 10))
-        plt.scatter(test_encode[:, 0], -test_encode[:, 1], c=(10 * test_targets), cmap=plt.cm.Spectral)
-        plt.xlim([-1.5, 1.5])
-        plt.ylim([-1.5, 1.5])
-        plt.title('Test Latent Space\nLoss: {:.5f}'.format(test_loss))
-        plt.savefig('{}/test_latent_epoch_{}.png'.format(imagesdir, epoch + 1))
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.scatter(test_encode[:, 0], -test_encode[:, 1], c=(10 * test_targets), cmap=plt.cm.Spectral)
+        ax.set_xlim([-1.5, 1.5])
+        ax.set_ylim([-1.5, 1.5])
+        ax.set_title('Test Latent Space\nLoss: {:.5f}'.format(test_loss))
+        if args.align_name == 'atw':
+            plot_tree2D(ax, trainer.align_method.dtms.root, 1)
+        fig.savefig('{}/test_latent_epoch_{}.png'.format(imagesdir, epoch + 1))
         plt.close()
 
         # save sample input and reconstruction
@@ -146,7 +157,12 @@ def main():
 
         # save tree decoding
         if args.align_name == 'atw':
-            decode_tree(decode_function, trainer.align_method.dtms, '{}/latent_tree_node_decode_epoch_{}'.format(imagesdir, epoch+1), device=device)
+            decode_tree(lambda x: model.decoder(x),
+                        trainer.align_method.dtms,
+                        '{}/latent_tree_node_decode_epoch_{}'.format(imagesdir, epoch+1), device=device)
+            latent_tree = trainer.align_method.dtms.to_dict()
+            with open("{}/latent_tree_epoch_{}.json".format(imagesdir, epoch+1), 'wt') as f:
+                json.dump(latent_tree, f)
 
 
 if __name__ == '__main__':

@@ -170,12 +170,12 @@ class XWAEBatchTrainer:
             device (torch.Device): torch device
     """
     def __init__(self, autoencoder, optimizer, distribution_fn,
-                 align_name='atw', p=2, weight=1, device='cpu', **kwargs):
+                 align_name='atw', align_args={}, p=2, weight=1, device='cpu', **kwargs):
         self.model_ = autoencoder
         self.optimizer = optimizer
         self._distribution_fn = distribution_fn
         self.embedding_dim_ = self.model_.encoder.embedding_dim_
-        self.align_method = get_align(align_name=align_name, dim=self.embedding_dim_, **kwargs)
+        self.align_method = get_align(align_name=align_name, dim=self.embedding_dim_, **align_args)
         self.weight = weight
         self._device = device if device else torch.device('cpu')
 
