@@ -183,6 +183,10 @@ class XWAEBatchTrainer:
         return self.eval_on_batch(x)
 
     def train_on_batch(self, x):
+        try:
+            self.align_method.train = True
+        except:
+            pass
         # reset gradients
         self.optimizer.zero_grad()
         # autoencoder forward pass and loss
@@ -194,13 +198,17 @@ class XWAEBatchTrainer:
         return evals
 
     def test_on_batch(self, x):
+        try:
+            self.align_method.train = False
+        except:
+            pass
         # reset gradients
         self.optimizer.zero_grad()
         # autoencoder forward pass and loss
         evals = self.eval_on_batch(x)
         return evals
 
-    def eval_on_batch(self, x):
+    def eval_on_batch(self, x, update=True):
         x = x.to(self._device)
         recon_x, z = self.model_(x)
         # mutual information reconstruction loss
@@ -214,11 +222,12 @@ class XWAEBatchTrainer:
         w2 = float(self.weight) *  latent_align_loss / batch_size# approximate wasserstein-2 distance
         # w2 = 0
         loss = bce + l1 + w2
+        # loss = w2
         return {
             'loss': loss,
             'bce': bce,
             'l1': l1,
-            'w2': w2,
+            'w2': latent_align_loss/batch_size,
             'encode': z,
             'decode': recon_x
         }

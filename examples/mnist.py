@@ -11,7 +11,7 @@ import torch.optim as optim
 import torchvision.utils as vutils
 from alignlib import plot_tree2D
 from torchvision import datasets, transforms
-from xwae.distributions import rand_cirlce2d, rand_ring2d, rand_uniform2d, randn
+from xwae.distributions import rand_cirlce2d, rand_ring2d, rand_uniform2d, randn, rand
 from xwae.models.mnist import MNISTAutoencoder
 from xwae.trainer import SWAEBatchTrainer, XWAEBatchTrainer
 from xwae.tree_decoding import decode_tree
@@ -21,7 +21,7 @@ def main():
     # train args
     parser = argparse.ArgumentParser(description='Sliced Wasserstein Autoencoder PyTorch MNIST Example')
     parser.add_argument('--datadir', default='../.data/', help='path to dataset')
-    parser.add_argument('--outdir', default='output/', help='directory to output images and model checkpoints')
+    parser.add_argument('--outdir', default='output/mnist/', help='directory to output images and model checkpoints')
     parser.add_argument('--batch_size', type=int, default=500, metavar='N',
                         help='input batch size for training (default: 500)')
     parser.add_argument('--epochs', type=int, default=30, metavar='N',
@@ -41,7 +41,7 @@ def main():
                         help='number of dataloader workers if device is CPU (default: 8)')
     parser.add_argument('--seed', type=int, default=7, metavar='S',
                         help='random seed (default: 7)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='number of batches to log training status (default: 10)')
     parser.add_argument('--latent_dim', type=int, default=10)
     args = parser.parse_args()
@@ -61,10 +61,12 @@ def main():
     torch.manual_seed(args.seed)
     if args.cuda >= 0:
         torch.cuda.manual_seed(args.seed)
+
     # log args
     print('batch size {}\nepochs {}\nRMSprop lr {} alpha {}\ndistribution {}\nusing device {}\nseed set to {}'.format(
         args.batch_size, args.epochs, args.lr, args.alpha, args.distribution, device.type, args.seed
     ))
+
     # build train and test set data loaders
     train_loader = torch.utils.data.DataLoader(
         datasets.MNIST(args.datadir, train=True, download=True,
@@ -101,7 +103,9 @@ def main():
         distribution_fn = randn(args.latent_dim)
     # create batch sliced_wasserstein autoencoder trainer
     # trainer = SWAEBatchTrainer(model, optimizer, distribution_fn, device=device)
-    trainer = XWAEBatchTrainer(model, optimizer, distribution_fn, align_name=args.align_name, dim=args.latent_dim, fraction=args.fraction, weight=args.weight, device=device)
+    trainer = XWAEBatchTrainer(model, optimizer, distribution_fn,
+                               align_name=args.align_name, dim=args.latent_dim,
+                               fraction=args.fraction, weight=args.weight, device=device)
 
     # put networks in training mode
     model.train()
@@ -119,6 +123,17 @@ def main():
                         epoch + 1, float(epoch + 1) / (args.epochs) * 100.,
                         (batch_idx + 1), len(train_loader),
                         batch['loss'].item(), batch['bce'], batch['l1'], batch['w2']))
+        fig, ax = plt.subplots(figsize=(10, 10))
+        z = batch['encode'].detach().cpu().numpy()
+        ax.scatter(z[:, 0], z[:, 1], c=(10 * y.cpu().numpy()), cmap=plt.cm.Spectral)
+        # ax.set_xlim([-1.5, 1.5])
+        # ax.set_ylim([-1.5, 1.5])
+        # ax.set_title('Test Latent Space\nLoss: {:.5fx}'.format(test_loss))
+        if args.align_name == 'atw':
+            plot_tree2D(ax, trainer.align_method.dtms.root, 1)
+        fig.savefig('{}/debug-epoch-{}.png'.format(imagesdir, epoch+1))
+        plt.close()
+
 
         # evaluate autoencoder on test dataset
         test_encode, test_targets, test_loss = list(), list(), 0.0
@@ -135,8 +150,8 @@ def main():
                 test_loss))
         print('{{"metric": "loss", "value": {}}}'.format(test_loss))
 
-        # save model
-        torch.save(model.state_dict(), '{}/mnist_epoch_{}.pth'.format(chkptdir, epoch + 1))
+        # # save model
+        # torch.save(model.state_dict(), '{}/mnist_epoch_{}.pth'.format(chkptdir, epoch + 1))
 
         # save encoded samples plot
         fig, ax = plt.subplots(figsize=(10, 10))
